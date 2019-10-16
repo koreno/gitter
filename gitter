@@ -15,7 +15,21 @@ def popen(command):
 GITBIN = popen("which git")[0].strip()
 
 class RemoteBranch(str): pass
-class LocalBranch(str): pass
+class LocalBranch(str):
+
+    @classmethod
+    def from_raw(cls, raw):
+        if raw.startswith("*"):
+            return ThisBranch(raw[1:].strip())
+        elif raw.startswith("+"):
+            return WorktreeBranch(raw[1:].strip())
+        else:
+            return cls(raw.strip())
+
+
+class ThisBranch(LocalBranch): pass
+class WorktreeBranch(LocalBranch): pass
+
 class ModifiedFile(str): pass
 class DeletedFile(str): pass
 class UntrackedFile(str): pass
@@ -101,8 +115,7 @@ class GitRunner(object):
 
     def _list_local_branches(self, sort_by='-creatordate'):
         branches = popen("%s branch --sort %s" % (GITBIN, sort_by))
-        branches = [b.strip("*").strip("+").strip() for b in branches]
-        branches = [LocalBranch(b) for b in branches]
+        branches = [LocalBranch.from_raw(b) for b in branches]
         return self._with_header("Local Branches", branches)
 
     def _list_remote_branches(self, sort_by='-creatordate'):
@@ -179,19 +192,29 @@ class GitRunner(object):
     def _do_checkout(self):
         self._assert_repo()
         options = self._list_modified() + self._list_deleted() + self._list_local_branches() + self._list_remote_branches()
-        selected = self._show_menu(options, multiselect=True)
-        branch = False
+        selected = self._show_menu(options, multiselect=False)
+        args = []
+
         if not selected:
             return
-        for s in selected:
-            if isinstance(s, (RemoteBranch, LocalBranch)):
-                branch = True
-        if branch and len(selected) > 1:
-            raise Exception("more than one branch selected")
-        if isinstance(selected[0], RemoteBranch):
-            selected = ["-b", selected[0].split("/")[-1], selected[0]]
-        ret = self._exec_git([self.command] + self.args + selected)
-        if ret == 0 and branch:
+
+        if not isinstance(selected, (RemoteBranch, LocalBranch)):
+            raise Exception("{} is not a branch".format(selected))
+
+        if isinstance(selected, ThisBranch):
+            return
+        elif isinstance(selected, WorktreeBranch):
+            self._system("git worktree list | grep {}".format(selected))
+            return
+        elif isinstance(selected, LocalBranch):
+            args.append(selected)
+        elif isinstance(selected, RemoteBranch):
+            args += ["-b", selected.split("/")[-1], selected]
+        else:
+            assert False
+
+        ret = self._exec_git([self.command] + self.args + args)
+        if ret == 0:
             return self._exec_git("submodule update --init --recursive".split())
         else:
             return ret
