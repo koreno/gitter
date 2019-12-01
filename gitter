@@ -282,6 +282,17 @@ class GitRunner(object):
             return self._exec_default()
         return self._command_with_hash()
 
+    def _do_inject(self):
+        self._assert_repo()
+        options = self._list_commits("HEAD")
+        if not options:
+            return
+        selected = self._show_menu(options, multiselect=False, precolored=True)
+        if not selected:
+            return
+        selected = selected.split(" ", 1)[0]
+        return self._exec_git([self.command, selected] + self.args)
+
     def _do_diff(self):
         self._assert_repo()
         if self.args:
